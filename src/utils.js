@@ -2,7 +2,7 @@ import Safe, { buildSignatureBytes, buildContractSignature, getSafeContract }  f
 import { polygon } from 'viem/chains'
 import readlineSync from 'readline-sync'
 import SafeApiKit from '@safe-global/api-kit'
-import { ethers } from "ethers";
+import { ethers, getAddress } from "ethers";
 import { SigningMethod } from '@safe-global/types-kit'
 
 const tx = {
@@ -60,6 +60,55 @@ export const connectSafe = async () => {
     console.log("SafeKit connected");
 }
 
+export const generateSafeAccount = async () => {
+  const threshold = readlineSync.question('Enter the threshold: ');
+  let owners = readlineSync.question('Enter the owners(["owner1", "owner2", "owner3" ...]): ');
+  owners = JSON.parse(owners);
+  if(owners.length < threshold) {
+    console.log("The length of the owner must be greater than or equal to the threshold.");
+    return;
+  }
+  const privateKey = readlineSync.question('Enter the private key of owner: ');
+  const safeAccountConfig = {
+    threshold,
+    owners: owners,
+  }
+  safeKit = await Safe.init({
+    provider: polygon.rpcUrls.default.http[0],
+    signer: privateKey,
+    predictedSafe: { safeAccountConfig },
+  })
+  const newSafeAccount = await safeKit.getAddress();
+  console.log("prediction safe account: ", newSafeAccount);
+  const isDeploy = readlineSync.question("是否部署这个Safe账号(y/n): ");
+  if(isDeploy !== "y") {
+    console.log("取消执行");
+  }else {
+    const deployTx = await safeKit.createSafeDeploymentTransaction();
+    const walletClient = await safeKit.getSafeProvider().getExternalSigner();
+    const privateClient = new safeKit.getSafeProvider().getExternalProvider()
+    const transactionHash = await walletClient.sendTransaction({
+      to: deployTx.to,
+      value: BigInt(deployTx.value),
+      data: deployTx.data,
+      chain: polygon
+    })
+    console.log("transactionHash: ", transactionHash);
+    const transactionReceipt = await privateClient.publicClient.waitForTransactionReceipt({
+      hash: transactionHash
+    })
+    console.log("transactionReceipt: ", transactionReceipt);
+    console.log("部署成功, 可通过浏览器查询交易hash查看是否部署成功。");
+    safeKit = await safeKit.connect({
+      safeAddress: newSafeAccount,
+      signer: privateKey,
+    })
+    ethersWallet = new ethers.Wallet(privateKey);
+    console.log("部署成功, 已连接到Safe账号。");
+    await querySafeInfo();
+  }
+}
+
 const getWallet = async () => {
     if(ethersWallet) {
         return ethersWallet;
@@ -101,7 +150,8 @@ export const querySafeInfo = async () => {
     try {
         const safeKit = await setSafeKit();
         const apiKit = await setApiKit();
-        const safeAddress = await safeKit.getAddress();
+        let safeAddress = await safeKit.getAddress();
+        safeAddress = getAddress(safeAddress);
         console.log("safeAddress: ", safeAddress);
         const isSafeDeployed = await safeKit.isSafeDeployed();
         console.log("isSafeDeployed: ", isSafeDeployed);
@@ -110,7 +160,7 @@ export const querySafeInfo = async () => {
         const wallet = await getWallet();
         console.log("signer: ", wallet.address);
         const nestedSafes = await apiKit.getSafesByOwner(safeAddress);
-        console.log("nested safes of safe: ", nestedSafes);
+        console.log("parent safes of safe: ", nestedSafes);
         const threshold = await safeKit.getThreshold();
         console.log("threshold: ", threshold);
         const balance = await safeKit.getBalance();
@@ -242,6 +292,45 @@ export const propose = async () => {
       // 提示无权签署
       console.log("无权提交");
     }
+}
+
+export const reject = async () => {
+  const rejectTxHash = readlineSync.question("请输入要拒绝的提案的safeTxHash: ")
+  const apiKit = await setApiKit();
+  const safeKit = await setSafeKit();
+  const wallet = await getWallet();
+  const rejectTx = await apiKit.getTransaction(rejectTxHash);
+  console.log("reject transaction: ");
+  showTxInfo(rejectTx);
+  console.log();
+  const currentNonce = await safeKit.getNonce();
+  console.log("current nonce: ", currentNonce);
+  console.log("reject transaction nonce: ", rejectTx.nonce);
+  console.log("拒绝提案说明：提交一个具有相同nonce的空提案，以拒绝该提案。");
+  const isReject = readlineSync.question("是否拒绝该提案(y/n): ");
+  if(isReject!== "y" || rejectTx.nonce < currentNonce) {
+    console.log("取消拒绝");
+  }else {
+    const newTx = await safeKit.createRejectionTransaction(rejectTx.nonce)
+    console.log("new transaction: ", newTx);
+    const newTxHash = await safeKit.getTransactionHash(newTx);
+    console.log("new transaction hash: ", newTxHash);
+    const signature = await safeKit.signHash(newTxHash);
+    const safeAddress = await safeKit.getAddress();
+    const singer = wallet.address;
+    try {
+      await apiKit.proposeTransaction({
+        safeAddress: safeAddress,
+        safeTxHash: newTxHash,
+        safeTransactionData: newTx.data,
+        senderAddress: singer,
+        senderSignature: signature.data
+      })
+      console.log("拒绝提案已提交");
+    } catch (error) {
+      console.log("error: ", error);
+    }
+  }
 }
 
 export const confirm = async () => {

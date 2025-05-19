@@ -1,8 +1,8 @@
 import readlineSync from 'readline-sync'
-import { querySafeInfo, connectSafe, queryPendingTxs, propose, confirm, execute } from './utils.js';
+import { querySafeInfo, connectSafe, generateSafeAccount, queryPendingTxs, propose, confirm, execute, reject } from './utils.js';
 
 const enterFun = () => {
-    console.log("请选择要进行的操作: 1、获取safe账号信息 2、链接safe账号 3、获取待办提案 4、提交提案 5、签署提案 6、执行提案 7、退出")
+    console.log("请选择要进行的操作: 1、获取safe账号信息 2、链接safe账号 3、生成Safe账号 4、获取待办提案 5、提交提案 6、拒绝提案 7、签署提案 8、执行提案 9、退出")
     const operate = readlineSync.question("请输入操作编号: ")
     return operate;
 }
@@ -19,22 +19,30 @@ const enterFun = () => {
                 await connectSafe();
                 break;
             case "3":
+                // 生成Safe账号
+                await generateSafeAccount();
+                break;
+            case "4":
                 // 查看待签署提案
                 await queryPendingTxs()
                 break;
-            case "4":
+            case "5":
                 // 提交提案
                 await propose();
                 break;
-            case "5":
+            case "6":
+                // 拒绝提案
+                await reject();
+                break;
+            case "7":
                 // 签署提案
                 await confirm();
                 break;
-            case "6":
+            case "8":
                 // 执行提案
                 await execute();
                 break;
-            case "7":
+            case "9":
                 console.log("退出");
                 process.exit(0);
             default:
